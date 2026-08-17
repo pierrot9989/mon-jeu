@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duo Game — À Distance</title>
+    <!-- PeerJS pour la connexion directe WebRTC P2P -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --primary: #ff4b72;
+            --primary-hover: #e03a5f;
+            --accent: #38bdf8;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+            --success: #22c55e;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+        body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; justify-content: center; align-items: center; padding: 20px; }
+
+        .app-container { width: 100%; max-width: 900px; background: var(--panel); border-radius: 16px; border: 1px solid var(--border); box-shadow: 0 20px 40px rgba(0,0,0,0.5); overflow: hidden; }
+        header { background: rgba(0,0,0,0.25); padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        h1 { font-size: 1.3rem; color: var(--primary); }
+        
+        .status-pill { padding: 6px 14px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; background: #334155; color: var(--text-muted); }
+        .status-pill.online { background: rgba(34, 197, 94, 0.2); color: var(--success); border: 1px solid var(--success); }
+
+        .content { padding: 24px; }
+        .screen { display: none; }
+        .screen.active { display: block; }
+
+        /* Inputs & Buttons */
+        input[type="text"], textarea, select { width: 100%; padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); margin-top: 6px; margin-bottom: 12px; font-size: 0.95rem; }
+        input:focus { outline: none; border-color: var(--accent); }
+        
+        .btn { display: inline-block; width: 100%; padding: 12px; background: var(--primary); color: white; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 1rem; text-align: center; }
+        .btn:hover { background: var(--primary-hover); }
+        .btn-accent { background: var(--accent); color: #000; }
+        .btn-accent:hover { background: #0284c7; color: #fff; }
+        .btn-sec { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+        .btn-sec:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+        .btn-danger { background: #ef4444; color: white; }
+
+        /* Grid layouts */
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+
+        /* Hub & Selection */
+        .games-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 20px; }
+        .game-card { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 20px; cursor: pointer; transition: 0.2s; }
+        .game-card:hover { border-color: var(--primary); transform: translateY(-3px); }
+        .game-card h3 { color: var(--text); margin-bottom: 8px; }
+        .game-card p { font-size: 0.85rem; color: var(--text-muted); }
+
+        /* Customization Editor */
+        .config-item { background: rgba(0,0,0,0.2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; position: relative; }
+        .config-item .remove-btn { position: absolute; top: 10px; right: 10px; width: auto; padding: 4px 10px; font-size: 0.8rem; }
+
+        /* Game Elements */
+        .game-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: rgba(0,0,0,0.2); padding: 12px 16px; border-radius: 10px; }
+        .score-board { display: flex; gap: 20px; font-weight: bold; font-size: 0.95rem; }
+        
+        .qcm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
+        .qcm-btn { padding: 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font-size: 1rem; cursor: pointer; transition: 0.2s; }
+        .qcm-btn:hover { border-color: var(--accent); background: rgba(56, 189, 248, 0.1); }
+        .qcm-btn.selected { border-color: var(--primary); background: rgba(255, 75, 114, 0.2); }
+
+        .reveal-box { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; background: rgba(0,0,0,0.3); padding: 20px; border-radius: 12px; }
+        .reveal-card { text-align: center; }
+        .reveal-card h4 { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 6px; }
+        .reveal-card .val { font-size: 1.1rem; font-weight: bold; color: var(--accent); }
+
+        /* Drawing Canvas */
+        .canvas-wrap { position: relative; width: 100%; max-width: 550px; margin: 0 auto; }
+        canvas { background: #ffffff; border-radius: 10px; cursor: crosshair; display: block; width: 100%; height: 320px; touch-action: none; }
+        .canvas-tools { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+        .color-dot { width: 28px; height: 28px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
+        .color-dot.active { border-color: #ffffff; transform: scale(1.15); }
+
+        /* Chat / Logs */
+        .chat-box { background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 10px; height: 130px; overflow-y: auto; padding: 10px; font-size: 0.85rem; text-align: left; margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+        .chat-msg { color: var(--text); }
+        .chat-msg.system { color: var(--accent); font-style: italic; }
+        .chat-msg.success { color: var(--success); font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <header>
+        <h1>Duo Game (En Ligne)</h1>
+        <div id="conn-status" class="status-pill">Hors-ligne</div>
+    </header>
+
+    <div class="content">
+
+        <!-- ÉCRAN 1 : Connexion Réseau (PeerJS) -->
+        <div id="screen-network" class="screen active">
+            <h2>Connexion à distance</h2>
+            <p style="color: var(--text-muted); margin-top: 4px; margin-bottom: 20px;">Ouvrez cette page sur deux ordinateurs différents pour vous connecter.</p>
+
+            <div class="grid-2">
+                <div class="card">
+                    <h3>Hôte (Joueur A)</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin: 10px 0;">Créez la partie et transmettez le code à votre partenaire.</p>
+                    <button class="btn" onclick="initHost()">Générer le code salon</button>
+                    <div id="host-code" style="margin-top: 15px; font-weight: bold; color: var(--accent); font-size: 1.1rem; word-break: break-all;"></div>
+                </div>
+
+                <div class="card">
+                    <h3>Invité (Joueur B)</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-muted); margin: 10px 0;">Saisissez le code transmis par l'hôte.</p>
+                    <input type="text" id="join-code" placeholder="Coller le code du salon...">
+                    <button class="btn btn-accent" onclick="joinRoom()">Rejoindre le salon</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ÉCRAN 2 : Selection des Jeux -->
+        <div id="screen-hub" class="screen">
+            <h2>Choix du Mini-Jeu</h2>
+            <div class="games-grid">
+                <div class="game-card" onclick="openConfig(1)">
+                    <h3>1. ❤️ Qui connaît le mieux ?</h3>
+                    <p>Réponses secrètes, devinettes croisées et comptage de points.</p>
+                </div>
+                <div class="game-card" onclick="openConfig(2)">
+                    <h3>2. 🧠 Quiz amoureux</h3>
+                    <p>Questions à 4 choix multiples. Révélation synchrone.</p>
+                </div>
+                <div class="game-card" onclick="openConfig(3)">
+                    <h3>3. 🎨 Dessine-moi ça</h3>
+                    <p>Dessin synchrone en temps réel et tchat de devinette.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ÉCRAN 3 : Éditeur d'avant-partie -->
+        <div id="screen-config" class="screen">
+            <h2 id="config-title">Configuration</h2>
+            <p style="color: var(--text-muted); margin-bottom: 16px;">Ajoutez ou modifiez les cartes/questions avant de lancer la partie.</p>
+            
+            <div id="config-list"></div>
+
+            <button class="btn btn-sec" style="margin-bottom: 12px;" onclick="addConfigEntry()">+ Ajouter un élément</button>
+            <button class="btn" onclick="launchGame()">Lancer le jeu à distance 🚀</button>
+            <button class="btn btn-sec" style="margin-top: 8px;" onclick="showScreen('screen-hub')">Retour au menu</button>
+        </div>
+
+        <!-- ÉCRAN 4 : Terrain de Jeu -->
+        <div id="screen-game" class="screen">
+            <div class="game-header">
+                <h3 id="game-name">Nom du Jeu</h3>
+                <div class="score-board">
+                    <span id="score-p1" style="color: var(--primary);">Joueur A: 0</span>
+                    <span id="score-p2" style="color: var(--accent);">Joueur B: 0</span>
+                </div>
+                <button class="btn btn-sec" style="width: auto; padding: 6px 12px;" onclick="exitGame()">Quitter</button>
+            </div>
+
+            <div id="game-body"></div>
+
+            <div class="chat-box" id="chat-logs">
+                <div class="chat-msg system">— Connexion établie. Bon jeu ! —</div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+    /* Network & Global State */
+    let peer = null;
+    let conn = null;
+    let isHost = false;
+    let currentGameId = 0;
+
+    let scores = { host: 0, guest: 0 };
+    let gameData = [];
+    let currentStep = 0;
+    let localAnswer = null;
+    let remoteAnswer = null;
+
+    /* Canvas State (Dessine-moi ça) */
+    let isDrawing = false;
+    let currentColor = '#0f172a';
+    let currentBrushSize = 4;
+
+    /* Données par défaut pour l'éditeur */
+    const defaults = {
+        1: [
+            { q: "Mon plat préféré ?" },
+            { q: "Où j'aimerais voyager ?" },
+            { q: "Quelle est ma plus grosse manie ?" },
+            { q: "Quel film je choisirais ce soir ?" }
+        ],
+        2: [
+            {
+                q: "Si on pouvait partir demain, où est-ce que je choisirais ?",
+                a: "Plage / Tropiques", b: "Chalet à la montagne", c: "Capiteuse métropole", d: "Road-trip en van"
+            },
+            {
+                q: "Quel est mon rendez-vous idéal ?",
+                a: "Pique-nique au coucher de soleil", b: "Restaurant gastronomique", c: "Soirée jeux vidéo / pizza", d: "Parc d'attraction"
+            }
+        ],
+        3: [
+            { word: "Un chat astronaute" },
+            { word: "Un dinosaure qui fait du vélo" },
+            { word: "Une pizza géante" }
+        ]
+    };
+
+    /* PeerJS Networking */
+    function initHost() {
+        isHost = true;
+        peer = new Peer();
+        
+        peer.on('open', (id) => {
+            document.getElementById('host-code').innerText = id;
+            logSystem("Code salon généré. En attente du partenaire...");
+        });
+
+        peer.on('connection', (c) => {
+            conn = c;
+            bindConnectionEvents();
+        });
+    }
+
+    function joinRoom() {
+        const code = document.getElementById('join-code').value.trim();
+        if(!code) return alert("Veuillez saisir un code valide.");
+        isHost = false;
+        peer = new Peer();
+
+        peer.on('open', () => {
+            conn = peer.connect(code);
+            bindConnectionEvents();
+        });
+    }
+
+    function bindConnectionEvents() {
+        conn.on('open', () => {
+            document.getElementById('conn-status').innerText = "Connecté à distance";
+            document.getElementById('conn-status').classList.add('online');
+            showScreen('screen-hub');
+            logSystem("Partenaire connecté avec succès !");
+        });
+
+        conn.on('data', (packet) => {
+            handlePacket(packet);
+        });
+
+        conn.on('close', () => {
+            alert("Connexion perdue avec le partenaire.");
+            location.reload();
+        });
+    }
+
+    function sendPacket(type, payload) {
+        if (conn && conn.open) {
+            conn.send({ type, payload });
+        }
+    }
+
+    function handlePacket(packet) {
+        const { type, payload } = packet;
+
+        switch(type) {
+            case 'START_GAME':
+                currentGameId = payload.gameId;
+                gameData = payload.data;
+                currentStep = 0;
+                scores = { host: 0, guest: 0 };
+                initGameEngine();
+                break;
+
+            case 'SUBMIT_ANSWER':
+                remoteAnswer = payload.answer;
+                checkDualAnswers();
+                break;
+
+            case 'DRAW_LINE':
+                renderRemoteLine(payload);
+                break;
+
+            case 'CLEAR_CANVAS':
+                clearLocalCanvas();
+                break;
+
+            case 'GUESS_TRY':
+                handleGuessAttempt(payload);
+                break;
+
+            case 'POINT_AWARDED':
+                scores = payload.scores;
+                updateScores();
+                logSystem(`${payload.winner} gagne 1 point !`);
+                nextStep();
+                break;
+
+            case 'NEXT_STEP':
+                currentStep = payload.step;
+                renderStep();
+                break;
+        }
+    }
+
+    function logSystem(msg, type = 'system') {
+        const logs = document.getElementById('chat-logs');
+        const line = document.createElement('div');
+        line.className = `chat-msg ${type}`;
+        line.innerText = msg;
+        logs.appendChild(line);
+        logs.scrollTop = logs.scrollHeight;
+    }
+
+    function showScreen(id) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(id).classList.add('active');
+    }
+
+    /* Éditeur de Configuration Avant-Partie */
+    function openConfig(gameId) {
+        currentGameId = gameId;
+        const list = document.getElementById('config-list');
+        list.innerHTML = '';
+
+        const titles = ["", "❤️ Qui connaît le mieux ?", "🧠 Quiz amoureux", "🎨 Dessine-moi ça"];
+        document.getElementById('config-title').innerText = titles[gameId];
+
+        const initial = JSON.parse(JSON.stringify(defaults[gameId]));
+        initial.forEach(item => addConfigEntry(item));
+
+        showScreen('screen-config');
+    }
+
+    function addConfigEntry(data = {}) {
+        const list = document.getElementById('config-list');
+        const card = document.createElement('div');
+        card.className = 'config-item';
+
+        if (currentGameId === 1) {
+            card.innerHTML = `
+                <button class="btn btn-danger remove-btn" onclick="this.parentElement.remove()">Fermer</button>
+                <label style="font-size:0.85rem; color:var(--text-muted);">Question :</label>
+                <input type="text" class="cfg-q" value="${data.q || ''}" placeholder="ex: Mon plat préféré ?">
+            `;
+        } else if (currentGameId === 2) {
+            card.innerHTML = `
+                <button class="btn btn-danger remove-btn" onclick="this.parentElement.remove()">Fermer</button>
+                <label style="font-size:0.85rem; color:var(--text-muted);">Question :</label>
+                <input type="text" class="cfg-q" value="${data.q || ''}" placeholder="Question du quiz...">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <input type="text" class="cfg-a" value="${data.a || ''}" placeholder="Option A">
+                    <input type="text" class="cfg-b" value="${data.b || ''}" placeholder="Option B">
+                    <input type="text" class="cfg-c" value="${data.c || ''}" placeholder="Option C">
+                    <input type="text" class="cfg-d" value="${data.d || ''}" placeholder="Option D">
+                </div>
+            `;
+        } else if (currentGameId === 3) {
+            card.innerHTML = `
+                <button class="btn btn-danger remove-btn" onclick="this.parentElement.remove()">Fermer</button>
+                <label style="font-size:0.85rem; color:var(--text-muted);">Mot / Expression à dessiner :</label>
+                <input type="text" class="cfg-word" value="${data.word || ''}" placeholder="ex: Un chat astronaute">
+            `;
+        }
+
+        list.appendChild(card);
+    }
+
+    function launchGame() {
+        const items = document.querySelectorAll('.config-item');
+        gameData = [];
+
+        items.forEach(item => {
+            if (currentGameId === 1) {
+                const q = item.querySelector('.cfg-q').value.trim();
+                if(q) gameData.push({ q });
+            } else if (currentGameId === 2) {
+                const q = item.querySelector('.cfg-q').value.trim();
+                const a = item.querySelector('.cfg-a').value.trim();
+                const b = item.querySelector('.cfg-b').value.trim();
+                const c = item.querySelector('.cfg-c').value.trim();
+                const d = item.querySelector('.cfg-d').value.trim();
+                if(q && a && b) gameData.push({ q, a, b, c, d });
+            } else if (currentGameId === 3) {
+                const word = item.querySelector('.cfg-word').value.trim();
+                if(word) gameData.push({ word });
+            }
+        });
+
+        if(gameData.length === 0) return alert("Veuillez ajouter au moins un élément.");
+
+        sendPacket('START_GAME', { gameId: currentGameId, data: gameData });
+        currentStep = 0;
+        scores = { host: 0, guest: 0 };
+        initGameEngine();
+    }
+
+    /* Moteur de Jeu Sync */
+    function initGameEngine() {
+        showScreen('screen-game');
+        updateScores();
+        
+        const titles = ["", "❤️ Qui connaît le mieux ?", "🧠 Quiz amoureux", "🎨 Dessine-moi ça"];
+        document.getElementById('game-name').innerText = titles[currentGameId];
+        
+        renderStep();
+    }
+
+    function updateScores() {
+        document.getElementById('score-p1').innerText = `Joueur A: ${scores.host}`;
+        document.getElementById('score-p2').innerText = `Joueur B: ${scores.guest}`;
+    }
+
+    function exitGame() {
+        showScreen('screen-hub');
+    }
+
+    function renderStep() {
+        localAnswer = null;
+        remoteAnswer = null;
+
+        if (currentStep >= gameData.length) {
+            document.getElementById('game-body').innerHTML = `
+                <div style="text-align:center; padding:30px;">
+                    <h2>🎉 Partie terminée !</h2>
+                    <p style="margin:15px 0; font-size:1.2rem;">Score Final : Joueur A (${scores.host}) - Joueur B (${scores.guest})</p>
+                    <button class="btn" onclick="showScreen('screen-hub')">Retour au menu principal</button>
+                </div>
+            `;
+            return;
+        }
+
+        const body = document.getElementById('game-body');
+        const item = gameData[currentStep];
+
+        if (currentGameId === 1) { // Qui connaît le mieux
+            body.innerHTML = `
+                <p style="font-size:0.85rem; color:var(--text-muted);">Manche ${currentStep + 1} / ${gameData.length}</p>
+                <h2 style="margin:10px 0 20px 0;">"${item.q}"</h2>
+                <p style="font-size:0.9rem; color:var(--accent); margin-bottom:12px;">Saisissez votre réponse en secret :</p>
+                <input type="text" id="g1-input" placeholder="Écrivez votre réponse ici...">
+                <button class="btn" onclick="submitAnswerG1()">Valider mon choix 🔒</button>
+                <div id="g1-status" style="margin-top:15px; font-weight:bold;"></div>
+            `;
+        } else if (currentGameId === 2) { // Quiz Amoureux
+            body.innerHTML = `
+                <p style="font-size:0.85rem; color:var(--text-muted);">Question ${currentStep + 1} / ${gameData.length}</p>
+                <h2 style="margin:10px 0 20px 0;">"${item.q}"</h2>
+                <div class="qcm-grid">
+                    <button class="qcm-btn" onclick="selectQcm(this, '${item.a}')">A) ${item.a}</button>
+                    <button class="qcm-btn" onclick="selectQcm(this, '${item.b}')">B) ${item.b}</button>
+                    ${item.c ? `<button class="qcm-btn" onclick="selectQcm(this, '${item.c}')">C) ${item.c}</button>` : ''}
+                    ${item.d ? `<button class="qcm-btn" onclick="selectQcm(this, '${item.d}')">D) ${item.d}</button>` : ''}
+                </div>
+                <div id="g2-status" style="text-align:center; font-weight:bold;"></div>
+            `;
+        } else if (currentGameId === 3) { // Dessine-moi ça
+            const drawerIsHost = (currentStep % 2 === 0);
+            const amIDrawer = (isHost && drawerIsHost) || (!isHost && !drawerIsHost);
+
+            if (amIDrawer) {
+                body.innerHTML = `
+                    <p style="color:var(--success); font-weight:bold; margin-bottom:8px;">🎨 C'est votre tour de DESSINER !</p>
+                    <h2>Mot secret : <span style="color:var(--accent);">${item.word}</span></h2>
+                    
+                    <div class="canvas-wrap">
+                        <canvas id="paint-canvas"></canvas>
+                    </div>
+
+                    <div class="canvas-tools">
+                        <div class="color-dot active" style="background:#0f172a;" onclick="setColor('#0f172a', this)"></div>
+                        <div class="color-dot" style="background:#ef4444;" onclick="setColor('#ef4444', this)"></div>
+                        <div class="color-dot" style="background:#22c55e;" onclick="setColor('#22c55e', this)"></div>
+                        <div class="color-dot" style="background:#38bdf8;" onclick="setColor('#38bdf8', this)"></div>
+                        <div class="color-dot" style="background:#eab308;" onclick="setColor('#eab308', this)"></div>
+                        <button class="btn btn-sec" style="width:auto; padding:4px 12px;" onclick="clearCanvasSignal()">Vider</button>
+                    </div>
+                `;
+                setupCanvasDrawer();
+            } else {
+                body.innerHTML = `
+                    <p style="color:var(--accent); font-weight:bold; margin-bottom:8px;">👀 Votre partenaire dessine... Devinez le mot !</p>
+                    <div class="canvas-wrap">
+                        <canvas id="paint-canvas"></canvas>
+                    </div>
+                    <div style="display:flex; gap:10px; margin-top:15px;">
+                        <input type="text" id="guess-input" placeholder="Proposez une réponse...">
+                        <button class="btn btn-accent" style="width:120px;" onclick="sendGuess()">Envoyer</button>
+                    </div>
+                `;
+                setupCanvasReceiver();
+            }
+        }
+    }
+
+    /* Logique Jeu 1 */
+    function submitAnswerG1() {
+        const val = document.getElementById('g1-input').value.trim();
+        if(!val) return;
+        
+        localAnswer = val;
+        sendPacket('SUBMIT_ANSWER', { answer: val });
+        
+        document.getElementById('g1-status').innerText = "Réponse enregistrée. En attente du partenaire...";
+        checkDualAnswers();
+    }
+
+    /* Logique Jeu 2 */
+    function selectQcm(btn, choice) {
+        document.querySelectorAll('.qcm-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+
+        localAnswer = choice;
+        sendPacket('SUBMIT_ANSWER', { answer: choice });
+        
+        document.getElementById('g2-status').innerText = "Choix enregistré. En attente du partenaire...";
+        checkDualAnswers();
+    }
+
+    /* Vérification et Révélation (Jeux 1 & 2) */
+    function checkDualAnswers() {
+        if (localAnswer !== null && remoteAnswer !== null) {
+            const body = document.getElementById('game-body');
+            const p1Text = isHost ? localAnswer : remoteAnswer;
+            const p2Text = isHost ? remoteAnswer : localAnswer;
+
+            let html = `
+                <h2>Révélation des réponses !</h2>
+                <div class="reveal-box">
+                    <div class="reveal-card">
+                        <h4>Joueur A</h4>
+                        <div class="val">${p1Text}</div>
+                    </div>
+                    <div class="reveal-card">
+                        <h4>Joueur B</h4>
+                        <div class="val">${p2Text}</div>
+                    </div>
+                </div>
+            `;
+
+            if (isHost) {
+                html += `
+                    <p style="text-align:center; margin-bottom:12px;">Accorder un point :</p>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn btn-sec" onclick="awardPoint('host')">+1 Joueur A</button>
+                        <button class="btn btn-sec" onclick="awardPoint('guest')">+1 Joueur B</button>
+                        <button class="btn btn-accent" onclick="awardPoint(null)">Aucun point / Suivant</button>
+                    </div>
+                `;
+            } else {
+                html += `<p style="text-align:center; color:var(--text-muted);">L'hôte valide les points...</p>`;
+            }
+
+            body.innerHTML = html;
+        }
+    }
+
+    function awardPoint(winner) {
+        if (winner) scores[winner]++;
+        const winnerName = winner === 'host' ? 'Joueur A' : (winner === 'guest' ? 'Joueur B' : 'Personne');
+        
+        sendPacket('POINT_AWARDED', { scores, winner: winnerName });
+        updateScores();
+        logSystem(`${winnerName} marque un point !`);
+        nextStep();
+    }
+
+    function nextStep() {
+        currentStep++;
+        sendPacket('NEXT_STEP', { step: currentStep });
+        renderStep();
+    }
+
+    /* Logique Jeu 3 (Canvas) */
+    function setupCanvasDrawer() {
+        const cvs = document.getElementById('paint-canvas');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.parentElement.clientWidth;
+        cvs.height = 320;
+
+        let lastX = 0, lastY = 0;
+
+        cvs.onmousedown = (e) => {
+            isDrawing = true;
+            const r = cvs.getBoundingClientRect();
+            lastX = e.clientX - r.left;
+            lastY = e.clientY - r.top;
+        };
+
+        cvs.onmousemove = (e) => {
+            if(!isDrawing) return;
+            const r = cvs.getBoundingClientRect();
+            const x = e.clientX - r.left;
+            const y = e.clientY - r.top;
+
+            drawLine(ctx, lastX, lastY, x, y, currentColor, currentBrushSize);
+            sendPacket('DRAW_LINE', { x1: lastX, y1: lastY, x2: x, y2: y, color: currentColor, size: currentBrushSize });
+
+            lastX = x;
+            lastY = y;
+        };
+
+        cvs.onmouseup = () => isDrawing = false;
+        cvs.onmouseleave = () => isDrawing = false;
+    }
+
+    function setupCanvasReceiver() {
+        const cvs = document.getElementById('paint-canvas');
+        cvs.width = cvs.parentElement.clientWidth;
+        cvs.height = 320;
+    }
+
+    function setColor(color, el) {
+        currentColor = color;
+        document.querySelectorAll('.color-dot').forEach(d => d.classList.remove('active'));
+        el.classList.add('active');
+    }
+
+    function drawLine(ctx, x1, y1, x2, y2, color, size) {
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = size;
+        ctx.lineCap = 'round';
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    function renderRemoteLine(p) {
+        const cvs = document.getElementById('paint-canvas');
+        if(!cvs) return;
+        const ctx = cvs.getContext('2d');
+        drawLine(ctx, p.x1, p.y1, p.x2, p.y2, p.color, p.size);
+    }
+
+    function clearCanvasSignal() {
+        clearLocalCanvas();
+        sendPacket('CLEAR_CANVAS', {});
+    }
+
+    function clearLocalCanvas() {
+        const cvs = document.getElementById('paint-canvas');
+        if(cvs) {
+            const ctx = cvs.getContext('2d');
+            ctx.clearRect(0, 0, cvs.width, cvs.height);
+        }
+    }
+
+    function sendGuess() {
+        const input = document.getElementById('guess-input');
+        const val = input.value.trim();
+        if(!val) return;
+
+        const sender = isHost ? 'Joueur A' : 'Joueur B';
+        logSystem(`${sender} : ${val}`, 'chat-msg');
+        
+        sendPacket('GUESS_TRY', { word: val, sender });
+        input.value = '';
+    }
+
+    function handleGuessAttempt(payload) {
+        logSystem(`${payload.sender} propose : ${payload.word}`, 'chat-msg');
+        
+        const targetWord = gameData[currentStep].word.toLowerCase().trim();
+        if (payload.word.toLowerCase().trim() === targetWord) {
+            logSystem(`🎉 BRAVO ! "${payload.word}" était la bonne réponse !`, 'success');
+            
+            if (isHost) {
+                const winnerKey = payload.sender === 'Joueur A' ? 'host' : 'guest';
+                scores[winnerKey]++;
+                sendPacket('POINT_AWARDED', { scores, winner: payload.sender });
+                updateScores();
+                setTimeout(nextStep, 1500);
+            }
+        }
+    }
+</script>
+
+</body>
+</html>
